@@ -1,6 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.20" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ResourceReservation.Domain\ResourceReservation.Domain.csproj" />
   </ItemGroup>
 
