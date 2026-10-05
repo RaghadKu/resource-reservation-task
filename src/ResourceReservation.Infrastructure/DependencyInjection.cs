@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddDbContext<AppDbContext>(options => options.UseSqlServer(connectionString));
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+        services.AddScoped<IResourceLock, ResourceLock>();
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
 
         // AddIdentityCore (not AddIdentity): no cookies, no UI. We use JWT.
