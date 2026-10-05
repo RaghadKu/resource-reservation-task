@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 using ResourceReservation.Application.Abstractions;
+using ResourceReservation.Domain.Entities;
 using ResourceReservation.Infrastructure.Identity;
 
 namespace ResourceReservation.Infrastructure.Persistence;

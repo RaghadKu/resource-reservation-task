@@ -19,4 +19,8 @@
     <ProjectReference Include="..\ResourceReservation.Infrastructure\ResourceReservation.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Controllers\" />
+  </ItemGroup>
+
 </Project>

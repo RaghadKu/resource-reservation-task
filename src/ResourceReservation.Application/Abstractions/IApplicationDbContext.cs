@@ -1,6 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 
+using ResourceReservation.Domain.Entities;
+
 namespace ResourceReservation.Application.Abstractions;
 
 public interface IApplicationDbContext
