@@ -61,7 +61,7 @@ internal sealed class GlobalExceptionHandler(
         NotFoundException e => new(404, "Not found", e.Message),
         ConflictException e => new(409, "Conflict", e.Message),
         InvalidStateTransitionException e => new(409, "Conflict", e.Message),
-
+        IdempotencyKeyReuseException e => new(422, "Unprocessable content", e.Message),
         // Backstop: a unique index rejected a duplicate that the service check missed (a race).
         DbUpdateException { InnerException: SqlException { Number: 2601 or 2627 } }
             => new(409, "Conflict", "The request conflicts with existing data."),

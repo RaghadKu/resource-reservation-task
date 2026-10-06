@@ -10,6 +10,7 @@ public interface IApplicationDbContext
     DbSet<Resource> Resources { get; }
     DbSet<Reservation> Reservations { get; }
     DbSet<WaitlistEntry> WaitlistEntries { get; }
+    DbSet<IdempotencyRecord> IdempotencyRecords { get; }
 
     DatabaseFacade Database { get; }
 

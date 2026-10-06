@@ -7,6 +7,7 @@ public static class BackgroundJobsExtensions
     public static IServiceCollection AddBackgroundWorkers(this IServiceCollection services)
     {
         services.AddHostedService<OfferExpiryWorker>();
+        services.AddHostedService<IdempotencyCleanupWorker>();
         return services;
     }
 }

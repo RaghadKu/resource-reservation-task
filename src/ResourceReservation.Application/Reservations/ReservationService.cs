@@ -17,39 +17,69 @@ public sealed class ReservationService(
     ICurrentUser currentUser,
     IWaitlistProcessor waitlistProcessor) : IReservationService
 {
-    public async Task<ReservationResponse> CreateAsync(CreateReservationRequest request, CancellationToken cancellationToken)
+    public async Task<CreateReservationResult> CreateAsync(
+        CreateReservationRequest request, string? idempotencyKey, CancellationToken cancellationToken)
     {
         var userId = currentUser.UserId;
-        var now = clock.UtcNow;
+        var key = IdempotencyKeys.Validate(idempotencyKey);                                   // 400
 
-        // 1. Pure Domain validation (400): range order, future start, duration limits.
-        //    Nothing is added to the context yet.
-        var range = new TimeRange(request.StartTime!.Value.UtcDateTime, request.EndTime!.Value.UtcDateTime);
-        var reservation = Reservation.CreateConfirmed(request.ResourceId!.Value, userId, range, now);
+        var resourceId = request.ResourceId!.Value;
+        var startUtc = request.StartTime!.Value.UtcDateTime;
+        var endUtc = request.EndTime!.Value.UtcDateTime;
+        var hash = IdempotencyKeys.Hash(resourceId, startUtc, endUtc);
+
+        // 1. Replay check comes BEFORE domain validation: a retry sent after the slot's start time
+        //    must get its original answer, not "start must be in the future".
+        if (await FindRecordAsync(userId, key, cancellationToken) is { } seen)
+            return await ReplayAsync(seen, hash, cancellationToken);
+
+        // 2. Pure Domain validation (400). Nothing is added to the context yet.
+        var now = clock.UtcNow;
+        var range = new TimeRange(startUtc, endUtc);
+        var reservation = Reservation.CreateConfirmed(resourceId, userId, range, now);
 
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        // 2. THE GATE: lock the resource row. Concurrent bookings of this resource queue up here.
-        //    Everything below runs with exclusive access to this resource's bookings.
-        var resource = await resourceLock.AcquireAsync(reservation.ResourceId, cancellationToken)
-            ?? throw new NotFoundException($"Resource '{reservation.ResourceId}' was not found.");   // 404
+        // 3. Claim the key INSIDE the transaction, before the resource lock (lock order: key, then resource).
+        //    A concurrent request with the same key waits right here until we commit or roll back.
+        var record = IdempotencyRecord.Start(userId, key, hash, now);
+        db.IdempotencyRecords.Add(record);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Duplicate key: another request committed first. Release our transaction and replay its result.
+            await tx.RollbackAsync(cancellationToken);
+            var winner = await FindRecordAsync(userId, key, cancellationToken);
+            if (winner is null) throw;   // not a duplicate: a genuine database error
+            return await ReplayAsync(winner, hash, cancellationToken);
+        }
+
+        // 4. THE GATE, then the checks. Unchanged from Step 10.
+        var resource = await resourceLock.AcquireAsync(resourceId, cancellationToken)
+            ?? throw new NotFoundException($"Resource '{resourceId}' was not found.");           // 404
 
         if (!resource.IsActive)
-            throw new ConflictException("The resource is not active.");                              // 409
+            throw new ConflictException("The resource is not active.");                          // 409
 
-        await EnsureUserIsUnderLimitAsync(userId, now, cancellationToken);                           // 409
+        await EnsureUserIsUnderLimitAsync(userId, now, cancellationToken);                       // 409
 
-        if (await db.IsSlotBlockedAsync(resource.Id, range.Start, range.End, cancellationToken))     // 409
+        if (await db.IsSlotBlockedAsync(resource.Id, range.Start, range.End, cancellationToken)) // 409
             throw new ConflictException(
                 "The requested time slot is not available. " +
                 $"You can join the waitlist: POST /api/resources/{resource.Id}/waitlist.");
 
+        // 5. Reservation + completed key commit together, or neither does.
         db.Reservations.Add(reservation);
+        record.Complete(reservation.Id, now);
         await db.SaveChangesAsync(cancellationToken);
-        await tx.CommitAsync(cancellationToken);   // releases the lock
+        await tx.CommitAsync(cancellationToken);
 
-        return await LoadResponseAsync(reservation.Id, cancellationToken)
+        var response = await LoadResponseAsync(reservation.Id, cancellationToken)
             ?? throw new InvalidOperationException("Reservation vanished after commit.");
+        return new CreateReservationResult(response, IsReplay: false);
     }
 
     public async Task<ReservationResponse> GetAsync(Guid id, CancellationToken cancellationToken)
@@ -206,4 +236,25 @@ public sealed class ReservationService(
             .Where(r => r.Id == id)
             .Select(ReservationMappings.ToResponse)
             .SingleOrDefaultAsync(cancellationToken);
+
+    private Task<IdempotencyRecord?> FindRecordAsync(Guid userId, string key, CancellationToken cancellationToken)
+    => db.IdempotencyRecords.AsNoTracking()
+        .SingleOrDefaultAsync(r => r.UserId == userId && r.Key == key, cancellationToken);
+
+    private async Task<CreateReservationResult> ReplayAsync(
+        IdempotencyRecord record, string requestHash, CancellationToken cancellationToken)
+    {
+        if (record.RequestHash != requestHash)
+            throw new IdempotencyKeyReuseException(
+                "This Idempotency-Key was already used with a different request.");              // 422
+
+        // A committed record always has its reservation (they commit together).
+        var reservationId = record.ReservationId
+            ?? throw new InvalidOperationException("Idempotency record has no reservation.");
+
+        var response = await LoadResponseAsync(reservationId, cancellationToken)
+            ?? throw new InvalidOperationException("Idempotent reservation no longer exists.");
+
+        return new CreateReservationResult(response, IsReplay: true);
+    }
 }

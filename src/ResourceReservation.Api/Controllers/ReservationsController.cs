@@ -14,10 +14,16 @@ public class ReservationsController(IReservationService reservations) : Controll
     [HttpPost]
     [ProducesResponseType<ReservationResponse>(StatusCodes.Status201Created)]
     public async Task<ActionResult<ReservationResponse>> Create(
-        CreateReservationRequest request, CancellationToken cancellationToken)
+        CreateReservationRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,   // nullable: the service returns the 400
+        CancellationToken cancellationToken)
     {
-        var created = await reservations.CreateAsync(request, cancellationToken);
-        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        var result = await reservations.CreateAsync(request, idempotencyKey, cancellationToken);
+
+        if (result.IsReplay)
+            Response.Headers["Idempotent-Replayed"] = "true";
+
+        return CreatedAtAction(nameof(GetById), new { id = result.Reservation.Id }, result.Reservation);
     }
 
     [HttpGet]

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 
+using ResourceReservation.Application.Idempotency;
 using ResourceReservation.Application.Reservations;
 using ResourceReservation.Application.Resources;
 using ResourceReservation.Application.Waitlist;
@@ -15,6 +16,7 @@ public static class DependencyInjection
         services.AddScoped<IWaitlistService, WaitlistService>();
         services.AddScoped<IWaitlistProcessor, WaitlistProcessor>();
         services.AddScoped<IOfferExpiryService, OfferExpiryService>();
+        services.AddScoped<IIdempotencyCleanupService, IdempotencyCleanupService>();
         return services;
     }
 }
