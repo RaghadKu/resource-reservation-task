@@ -14,7 +14,8 @@ public sealed class WaitlistService(
     IApplicationDbContext db,
     IResourceLock resourceLock,
     IDateTimeProvider clock,
-    ICurrentUser currentUser) : IWaitlistService
+    ICurrentUser currentUser,
+    IWaitlistProcessor waitlistProcessor) : IWaitlistService
 {
     public async Task<WaitlistEntryResponse> JoinAsync(
         Guid resourceId, JoinWaitlistRequest request, CancellationToken cancellationToken)
@@ -102,23 +103,23 @@ public sealed class WaitlistService(
             ?? throw new NotFoundException($"Waitlist entry '{id}' was not found.");
 
         var now = clock.UtcNow;
-        var slotFreed = false;
+        Reservation? released = null;
 
         // Leaving while Offered = declining the offer: release the held slot as well.
         if (entry.Status == WaitlistStatus.Offered)
         {
             var offer = await db.Reservations.SingleOrDefaultAsync(
                 r => r.WaitlistEntryId == id && r.Status == ReservationStatus.Pending, cancellationToken);
-            slotFreed = offer?.Cancel(now) ?? false;
+            if (offer?.Cancel(now) == true) released = offer;
         }
 
         // false = already Cancelled (idempotent 204). Throws 409 for Fulfilled/Expired.
         entry.Cancel(now);
 
-        if (slotFreed)
-        {
-            // >>> STEP 13 HOOK: process the waitlist for the released range, inside this transaction.
-        }
+        // The entry is already Cancelled here, so the processor can't offer the slot back to the same user.
+        if (released is not null)
+            await waitlistProcessor.ProcessAsync(
+                released.ResourceId, released.StartTime, released.EndTime, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);

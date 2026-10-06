@@ -35,4 +35,8 @@ public class ReservationsController(IReservationService reservations) : Controll
         await reservations.CancelAsync(id, cancellationToken);
         return NoContent();
     }
+
+    [HttpPost("{id:guid}/confirm")]
+    public async Task<ActionResult<ReservationResponse>> Confirm(Guid id, CancellationToken cancellationToken)
+    => Ok(await reservations.ConfirmAsync(id, cancellationToken));
 }

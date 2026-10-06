@@ -4,4 +4,5 @@ public static class FieldLengths
 {
     public const int ResourceName = 200;
     public const int ResourceDescription = 1000;
+    public const int IdempotencyKey = 100;
 }

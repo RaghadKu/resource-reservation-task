@@ -3,6 +3,7 @@
 using ResourceReservation.Application.Abstractions;
 using ResourceReservation.Application.Common;
 using ResourceReservation.Application.Common.Exceptions;
+using ResourceReservation.Application.Waitlist;
 using ResourceReservation.Domain.Common;
 using ResourceReservation.Domain.Entities;
 using ResourceReservation.Domain.Enums;
@@ -13,7 +14,8 @@ public sealed class ReservationService(
     IApplicationDbContext db,
     IResourceLock resourceLock,
     IDateTimeProvider clock,
-    ICurrentUser currentUser) : IReservationService
+    ICurrentUser currentUser,
+    IWaitlistProcessor waitlistProcessor) : IReservationService
 {
     public async Task<ReservationResponse> CreateAsync(CreateReservationRequest request, CancellationToken cancellationToken)
     {
@@ -134,8 +136,9 @@ public sealed class ReservationService(
 
         if (slotFreed)
         {
-            // >>> STEP 13 HOOK: process the waitlist for [reservation.StartTime, reservation.EndTime)
-            // here, inside this transaction, while we still hold the lock.
+            // Same transaction, same lock: cancel + hand-over are one atomic unit.
+            await waitlistProcessor.ProcessAsync(
+                 reservation.ResourceId, reservation.StartTime, reservation.EndTime, cancellationToken);
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -146,6 +149,43 @@ public sealed class ReservationService(
     {
         var entry = await db.WaitlistEntries.SingleOrDefaultAsync(e => e.Id == entryId, cancellationToken);
         entry?.Cancel(now);
+    }
+
+    public async Task<ReservationResponse> ConfirmAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var peek = await db.Reservations.AsNoTracking()
+            .Where(r => r.Id == id)
+            .Select(r => new { r.ResourceId, r.UserId })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new NotFoundException($"Reservation '{id}' was not found.");                // 404
+
+        // Owner only: an admin can cancel, but cannot accept an offer on someone's behalf.
+        if (peek.UserId != currentUser.UserId)
+            throw new ForbiddenException("Only the user who received the offer can confirm it.");  // 403
+
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        // Confirm and cancel/expire touch the same rows, so confirm takes the same lock (Step 11 correction).
+        _ = await resourceLock.AcquireAsync(peek.ResourceId, cancellationToken)
+            ?? throw new NotFoundException($"Resource '{peek.ResourceId}' was not found.");
+
+        var reservation = await db.Reservations.SingleOrDefaultAsync(r => r.Id == id, cancellationToken)
+            ?? throw new NotFoundException($"Reservation '{id}' was not found.");
+
+        var now = clock.UtcNow;
+        reservation.Confirm(now);   // 409 if not Pending, or if now >= OfferExpiresAt (checked here, not only by the worker)
+
+        if (reservation.WaitlistEntryId is { } entryId)
+        {
+            var entry = await db.WaitlistEntries.SingleOrDefaultAsync(e => e.Id == entryId, cancellationToken);
+            entry?.MarkFulfilled(now);   // Offered -> Fulfilled, in the same SaveChanges
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+
+        return await LoadResponseAsync(id, cancellationToken)
+            ?? throw new InvalidOperationException("Reservation vanished after commit.");
     }
 
     // The caller holds the resource lock. A user's cap is soft (see trade-offs).

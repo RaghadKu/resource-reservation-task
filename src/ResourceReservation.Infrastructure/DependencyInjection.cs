@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 using ResourceReservation.Application.Abstractions;
 using ResourceReservation.Application.Auth;
+using ResourceReservation.Application.Waitlist;
+using ResourceReservation.Infrastructure.BackgroundJobs;
 using ResourceReservation.Infrastructure.Common;
 using ResourceReservation.Infrastructure.Identity;
 using ResourceReservation.Infrastructure.Persistence;
@@ -50,6 +52,13 @@ public static class DependencyInjection
 
         services.AddSingleton<JwtTokenGenerator>();
         services.AddScoped<IAuthService, AuthService>();
+
+        services.AddOptions<WaitlistOptions>()
+            .Bind(configuration.GetSection(WaitlistOptions.SectionName))
+            .Validate(o => o.OfferWindowMinutes is > 0 and <= 1440, "Waitlist:OfferWindowMinutes must be between 1 and 1440.")
+            .ValidateOnStart();
+
+        services.AddBackgroundWorkers();
 
         return services;
     }

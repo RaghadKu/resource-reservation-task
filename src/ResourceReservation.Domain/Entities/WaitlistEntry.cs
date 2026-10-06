@@ -76,4 +76,11 @@ public class WaitlistEntry : BaseEntity
     public static Expression<Func<WaitlistEntry, bool>> WaitingOverlapping(DateTime start, DateTime end) =>
         e => e.Status == WaitlistStatus.Waiting
              && e.RequestedStartTime < end && start < e.RequestedEndTime;
+
+    /// <summary>Waiting → Expired: the requested period started and nobody was offered the slot.</summary>
+    public void ExpireAsUnserved(DateTime now) => Transition(WaitlistStatus.Waiting, WaitlistStatus.Expired, now);
+
+    // Entries that can never be served any more.
+    public static Expression<Func<WaitlistEntry, bool>> WaitingAndStarted(DateTime now) =>
+        e => e.Status == WaitlistStatus.Waiting && e.RequestedStartTime <= now;
 }

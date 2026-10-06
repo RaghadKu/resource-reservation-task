@@ -13,6 +13,8 @@ public static class DependencyInjection
         services.AddScoped<IResourceService, ResourceService>();
         services.AddScoped<IReservationService, ReservationService>();
         services.AddScoped<IWaitlistService, WaitlistService>();
+        services.AddScoped<IWaitlistProcessor, WaitlistProcessor>();
+        services.AddScoped<IOfferExpiryService, OfferExpiryService>();
         return services;
     }
 }
