@@ -43,4 +43,9 @@ public class ResourcesController(IResourceService resources) : ControllerBase
         await resources.DeactivateAsync(id, cancellationToken);
         return NoContent();
     }
+
+    [HttpGet("{resourceId:guid}/availability")]
+    public async Task<ActionResult<AvailabilityResponse>> GetAvailability(
+    Guid resourceId, [FromQuery] AvailabilityQuery query, CancellationToken cancellationToken)
+    => Ok(await resources.GetAvailabilityAsync(resourceId, query, cancellationToken));
 }

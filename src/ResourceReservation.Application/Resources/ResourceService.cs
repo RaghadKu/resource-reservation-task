@@ -126,5 +126,56 @@ public sealed class ResourceService(
             throw new ConflictException($"A resource named '{name}' already exists.");
     }
 
+    public async Task<AvailabilityResponse> GetAvailabilityAsync(
+    Guid resourceId, AvailabilityQuery query, CancellationToken cancellationToken)
+    {
+        var start = query.From!.Value.UtcDateTime;
+        var end = query.To!.Value.UtcDateTime;
+
+        if (start >= end)
+            throw new BadRequestException("'from' must be before 'to'.");
+        if (end - start > TimeSpan.FromDays(AvailabilityQuery.MaxRangeDays))
+            throw new BadRequestException($"The range cannot exceed {AvailabilityQuery.MaxRangeDays} days.");
+
+        var isActive = await db.Resources.AsNoTracking()
+            .Where(r => r.Id == resourceId)
+            .Select(r => (bool?)r.IsActive)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw NotFound(resourceId);
+
+        // Times only: no user ids or names leave this method (privacy rule from Step 7).
+        var rows = await db.Reservations.AsNoTracking()
+            .Where(r => r.ResourceId == resourceId)
+            .Where(Reservation.BlocksSlotDuring(start, end))
+            .OrderBy(r => r.StartTime)
+            .Select(r => new { r.StartTime, r.EndTime })
+            .ToListAsync(cancellationToken);
+
+        // Clamp to the requested window.
+        var busy = rows
+            .Select(r => new TimeWindow(
+                r.StartTime < start ? start : r.StartTime,
+                r.EndTime > end ? end : r.EndTime))
+            .ToList();
+
+        // Free = the gaps between busy windows, starting no earlier than "now" (the past isn't bookable).
+        var free = new List<TimeWindow>();
+        if (isActive)
+        {
+            var now = clock.UtcNow;
+            var cursor = start > now ? start : now;
+
+            foreach (var window in busy)   // already ordered; blocking reservations never overlap
+            {
+                if (window.Start > cursor) free.Add(new TimeWindow(cursor, window.Start));
+                if (window.End > cursor) cursor = window.End;
+            }
+
+            if (cursor < end) free.Add(new TimeWindow(cursor, end));
+        }
+
+        return new AvailabilityResponse(resourceId, start, end, busy, free);
+    }
+
     private static NotFoundException NotFound(Guid id) => new($"Resource '{id}' was not found.");
 }

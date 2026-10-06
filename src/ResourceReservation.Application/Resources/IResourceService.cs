@@ -9,4 +9,5 @@ public interface IResourceService
     Task<PagedResult<ResourceResponse>> ListAsync(ResourceQuery query, CancellationToken cancellationToken);
     Task<ResourceResponse> UpdateAsync(Guid id, UpdateResourceRequest request, CancellationToken cancellationToken);
     Task DeactivateAsync(Guid id, CancellationToken cancellationToken);
+    Task<AvailabilityResponse> GetAvailabilityAsync(Guid resourceId, AvailabilityQuery query, CancellationToken cancellationToken);
 }
