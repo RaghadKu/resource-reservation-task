@@ -13,15 +13,31 @@ public class ResourceConfiguration : IEntityTypeConfiguration<Resource>
             t.HasCheckConstraint("CK_Resources_Capacity", "[Capacity] > 0"));
 
         builder.HasKey(r => r.Id);
-        builder.Property(r => r.Id).ValueGeneratedNever(); 
 
-        builder.Property(r => r.Name).IsRequired().HasMaxLength(FieldLengths.ResourceName);
-        builder.Property(r => r.Description).HasMaxLength(FieldLengths.ResourceDescription);
-        builder.Property(r => r.Capacity).IsRequired();
-        builder.Property(r => r.IsActive).IsRequired();
-        builder.Property(r => r.CreatedAt).IsRequired();
-        builder.Property(r => r.UpdatedAt).IsRequired();
+        builder.Property(r => r.Id)
+            .ValueGeneratedNever(); 
 
-        builder.HasIndex(r => r.Name).IsUnique().HasDatabaseName("UX_Resources_Name");
+        builder.Property(r => r.Name)
+            .IsRequired()
+            .HasMaxLength(FieldLengths.ResourceName);
+
+        builder.Property(r => r.Description)
+            .HasMaxLength(FieldLengths.ResourceDescription);
+
+        builder.Property(r => r.Capacity)
+            .IsRequired();
+
+        builder.Property(r => r.IsActive)
+            .IsRequired();
+
+        builder.Property(r => r.CreatedAt)
+            .IsRequired();
+
+        builder.Property(r => r.UpdatedAt).
+            IsRequired();
+
+        builder.HasIndex(r => r.Name)
+            .IsUnique()
+            .HasDatabaseName("UX_Resources_Name");
     }
 }
