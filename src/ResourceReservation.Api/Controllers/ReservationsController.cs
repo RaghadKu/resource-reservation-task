@@ -28,4 +28,11 @@ public class ReservationsController(IReservationService reservations) : Controll
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ReservationResponse>> GetById(Guid id, CancellationToken cancellationToken)
         => Ok(await reservations.GetAsync(id, cancellationToken));
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Cancel(Guid id, CancellationToken cancellationToken)
+    {
+        await reservations.CancelAsync(id, cancellationToken);
+        return NoContent();
+    }
 }

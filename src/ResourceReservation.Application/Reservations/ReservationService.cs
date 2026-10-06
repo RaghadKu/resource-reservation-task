@@ -5,6 +5,7 @@ using ResourceReservation.Application.Common;
 using ResourceReservation.Application.Common.Exceptions;
 using ResourceReservation.Domain.Common;
 using ResourceReservation.Domain.Entities;
+using ResourceReservation.Domain.Enums;
 
 namespace ResourceReservation.Application.Reservations;
 
@@ -97,6 +98,54 @@ public sealed class ReservationService(
             .ThenBy(r => r.Id)                       // unique tiebreaker for stable pages
             .Select(ReservationMappings.ToResponse)
             .ToPagedResultAsync(query, cancellationToken);
+    }
+
+    public async Task CancelAsync(Guid id, CancellationToken cancellationToken)
+    {
+        // 1. Untracked peek: learn the resource and the owner. Neither can change, so no lock is needed yet.
+        var peek = await db.Reservations.AsNoTracking()
+            .Where(r => r.Id == id)
+            .Select(r => new { r.ResourceId, r.UserId })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new NotFoundException($"Reservation '{id}' was not found.");               // 404
+
+        if (peek.UserId != currentUser.UserId && !currentUser.IsAdmin)
+            throw new ForbiddenException("You cannot cancel another user's reservation.");       // 403
+
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        // 2. THE GATE (same lock as booking). Cancel + waitlist processing become one atomic unit.
+        _ = await resourceLock.AcquireAsync(peek.ResourceId, cancellationToken)
+            ?? throw new NotFoundException($"Resource '{peek.ResourceId}' was not found.");
+
+        // 3. Re-load TRACKED, now that we hold the lock: the state we act on can't change under us.
+        var reservation = await db.Reservations.SingleOrDefaultAsync(r => r.Id == id, cancellationToken)
+            ?? throw new NotFoundException($"Reservation '{id}' was not found.");
+
+        var now = clock.UtcNow;
+        var wasPendingOffer = reservation.Status == ReservationStatus.Pending;
+
+        // false = already Cancelled/Expired -> idempotent 204. Throws 409 if it already started.
+        var slotFreed = reservation.Cancel(now);
+
+        // Declining an offer: keep the pair in sync (Reservation Pending->Cancelled, Entry Offered->Cancelled).
+        if (slotFreed && wasPendingOffer && reservation.WaitlistEntryId is { } entryId)
+            await CancelOfferedEntryAsync(entryId, now, cancellationToken);
+
+        if (slotFreed)
+        {
+            // >>> STEP 13 HOOK: process the waitlist for [reservation.StartTime, reservation.EndTime)
+            // here, inside this transaction, while we still hold the lock.
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+    }
+
+    private async Task CancelOfferedEntryAsync(Guid entryId, DateTime now, CancellationToken cancellationToken)
+    {
+        var entry = await db.WaitlistEntries.SingleOrDefaultAsync(e => e.Id == entryId, cancellationToken);
+        entry?.Cancel(now);
     }
 
     // The caller holds the resource lock. A user's cap is soft (see trade-offs).
