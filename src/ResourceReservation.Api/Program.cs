@@ -2,11 +2,13 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.OpenApi.Models;
 
 using ResourceReservation.Api.Extensions;
+using ResourceReservation.Application;
 using ResourceReservation.Infrastructure;
 using ResourceReservation.Infrastructure.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddApiAuthentication(builder.Configuration);
 builder.Services.AddApiExceptionHandling();

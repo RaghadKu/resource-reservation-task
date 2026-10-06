@@ -94,4 +94,9 @@ public class Reservation : BaseEntity
     public static Expression<Func<Reservation, bool>> BlocksSlotDuring(DateTime start, DateTime end) =>
         r => (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Confirmed)
              && r.StartTime < end && start < r.EndTime;
+
+    // Active reservations that have not started yet (same status set as BlocksSlot).
+    public static Expression<Func<Reservation, bool>> UpcomingBlocking(DateTime now) =>
+        r => (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Confirmed)
+             && r.StartTime > now;
 }
